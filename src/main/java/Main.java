@@ -1,19 +1,14 @@
 import java.io.*;  // For file handling and input-output operations
-import java.net.HttpURLConnection; // For making API requests
-import java.net.URL; // For URL handling
-import java.nio.charset.StandardCharsets; // Encoding support
-import java.nio.file.Files; // File reading/writing
-import java.nio.file.Path; // Handling file paths
-import java.nio.file.Paths; // Path manipulations
-import java.security.MessageDigest; // For hashing (like Git)
-import java.security.NoSuchAlgorithmException; // Handling hashing errors
-import java.time.Instant; // Handling timestamps
-import java.util.*; // Data structures like List, Map, Scanner
-import java.util.zip.DeflaterOutputStream; // For compression (like Git blobs)
-import java.util.zip.InflaterInputStream; // For decompression
-import java.net.http.HttpClient; // For modern HTTP requests
-import java.net.http.HttpRequest; // For building HTTP requests
-import java.net.http.HttpResponse; // Handling HTTP responses
+import java.nio.charset.StandardCharsets; // For making API requests
+import java.nio.file.Files; // For URL handling
+import java.nio.file.Path; // Encoding support
+import java.nio.file.Paths; // File reading/writing
+import java.security.MessageDigest; // Handling file paths
+import java.security.NoSuchAlgorithmException; // Path manipulations
+import java.time.Instant; // For hashing (like Git)
+import java.util.*;
+import java.util.zip.DeflaterOutputStream; // Handling hashing errors
+import java.util.zip.InflaterInputStream; // Handling timestamps
 
 public class Main {
     public static void main(String[] args) throws IOException { 
@@ -45,27 +40,61 @@ public class Main {
                 break;
             }
 
+            // case "commit-tree" -> {
+            //     if (args.length < 6) {
+            //         throw new IllegalArgumentException(
+            //             "Usage: java Main commit-tree <tree> -p <parent> -m <message>");
+            //     }
+            //     String treeHash = args[1];
+            //     String parentHash = args[3];
+            //     String message = args[5];
+            //     String commitHash = commitTreeHandler(treeHash, parentHash, message);
+            //     System.out.println(commitHash);
+            //     break;
+            // }
+
             case "commit-tree" -> {
-                if (args.length < 6) {
+                if (args.length < 3) {
                     throw new IllegalArgumentException(
-                        "Usage: java Main commit-tree <tree> -p <parent> -m <message>");
+                        "Usage: java Main commit-tree <tree> [-p <parent>] -m <message>");
                 }
+
                 String treeHash = args[1];
-                String parentHash = args[3];
-                String message = args[5];
+                String parentHash = null;
+                String message = null;
+
+                for (int i = 2; i < args.length; i++) {
+                    switch (args[i]) {
+                        case "-p" -> parentHash = args[++i];
+                        case "-m" -> message = args[++i];
+                    }
+                }
+
+                if (message == null) {
+                    throw new IllegalArgumentException("Commit message is required with -m");
+                }
+
                 String commitHash = commitTreeHandler(treeHash, parentHash, message);
                 System.out.println(commitHash);
                 break;
             }
+
             
-          case "clone" -> {
-            if (args.length != 3) {
-              throw new IllegalArgumentException(
-                  "Usage: java Main clone <repository-url> <target-directory>");
-            }
-            cloneRepository(args);
-            break;
+            case "clone" -> {
+                if (args.length != 3) {
+                throw new IllegalArgumentException(
+                    "Usage: java Main clone <repository-url> <target-directory>");
+                }
+                cloneRepository(args);
+                break;
           }
+            case "add" ->{
+                if (args.length < 2) {
+                    System.out.println("Usage: java Main add <file>");
+                } else {
+                    addToIndex(args[1]);
+                }
+            }
 
             default -> System.out.println("Unknown command: " + command);
         }
@@ -380,5 +409,49 @@ public static void cloneRepository(String[] args) throws IOException {
       throw new RuntimeException("Cloning process was interrupted.", e);
     }
   }
+
+  public static void addToIndex(String filePath) throws IOException {
+    File file = new File(filePath);
+    if (!file.exists()) {
+        System.out.println("File not found: " + filePath);
+        return;
+    }
+
+    // Step 1: Read file content
+    byte[] fileContents = Files.readAllBytes(file.toPath());
+    String header = "blob " + fileContents.length + "\0";
+    byte[] headerBytes = header.getBytes(StandardCharsets.UTF_8);
+    byte[] fullContent = new byte[headerBytes.length + fileContents.length];
+    System.arraycopy(headerBytes, 0, fullContent, 0, headerBytes.length);
+    System.arraycopy(fileContents, 0, fullContent, headerBytes.length, fileContents.length);
+
+    // Step 2: Hash content and save blob
+    String sha1 = sha1Hex(fullContent); // Already defined in your file
+    String dir = sha1.substring(0, 2);
+    String fileSha = sha1.substring(2);
+    File blobFile = new File(".git/objects/" + dir + "/" + fileSha);
+    blobFile.getParentFile().mkdirs();
+
+    try (DeflaterOutputStream out = new DeflaterOutputStream(new FileOutputStream(blobFile))) {
+        out.write(fullContent);
+    }
+
+    // Step 3: Update .git/index
+    File indexFile = new File(".git/index");
+    indexFile.getParentFile().mkdirs();
+    List<String> index = new ArrayList<>();
+
+    if (indexFile.exists()) {
+        index = Files.readAllLines(indexFile.toPath());
+        index = index.stream()
+                .filter(line -> !line.startsWith(filePath + " "))
+                .collect(Collectors.toList());
+    }
+
+    index.add(filePath + " " + sha1);
+    Files.write(indexFile.toPath(), index);
+    System.out.println("Staged: " + filePath);
+}
+
 
 }
